@@ -3,10 +3,10 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	xhtml "golang.org/x/net/html"
 	"html"
 	"strings"
 	"time"
+	xhtml "golang.org/x/net/html"
 )
 
 type ItemStatus int
@@ -62,6 +62,11 @@ type ItemFilter struct {
 	FeedID   *int64
 	Status   *ItemStatus
 	Search   *string
+}
+
+type MarkFilter struct {
+	FolderID *int64
+	FeedID   *int64
 }
 
 func (s *Storage) CreateItems(items []Item) bool {
@@ -144,16 +149,19 @@ func listQueryPredicate(filter ItemFilter) (string, []interface{}) {
 	if len(cond) > 0 {
 		predicate = strings.Join(cond, " and ")
 	}
+
 	return predicate, args
 }
 
 func (s *Storage) ListItems(filter ItemFilter, offset, limit int, newestFirst bool) []Item {
 	predicate, args := listQueryPredicate(filter)
 	result := make([]Item, 0, 0)
-	order := "desc"
+
+	order := "date desc"
 	if !newestFirst {
-		order = "asc"
+		order = "date asc"
 	}
+
 	query := fmt.Sprintf(`
 		select
 			i.id, i.guid, i.feed_id, i.title, i.link, i.description,
@@ -161,7 +169,7 @@ func (s *Storage) ListItems(filter ItemFilter, offset, limit int, newestFirst bo
 		from items i
 		join feeds f on f.id = i.feed_id
 		where %s
-		order by i.date %s
+		order by %s
 		limit %d offset %d
 		`, predicate, order, limit, offset)
 	rows, err := s.db.Query(query, args...)
@@ -215,7 +223,7 @@ func (s *Storage) UpdateItemStatus(item_id int64, status ItemStatus) bool {
 	return err == nil
 }
 
-func (s *Storage) MarkItemsRead(filter ItemFilter) bool {
+func (s *Storage) MarkItemsRead(filter MarkFilter) bool {
 	cond := make([]string, 0)
 	args := make([]interface{}, 0)
 
@@ -227,6 +235,7 @@ func (s *Storage) MarkItemsRead(filter ItemFilter) bool {
 		cond = append(cond, "i.feed_id = ?")
 		args = append(args, *filter.FeedID)
 	}
+	// TODO: filter.Before
 	predicate := "1"
 	if len(cond) > 0 {
 		predicate = strings.Join(cond, " and ")
@@ -356,7 +365,7 @@ func (s *Storage) DeleteOldItems() {
 			delete from items where feed_id = ? and status != ? and date_arrived < ?`,
 			feedId,
 			STARRED,
-			time.Now().Add(-time.Hour*24*90),  // 90 days
+			time.Now().Add(-time.Hour*24*90), // 90 days
 		)
 		if err != nil {
 			s.log.Print(err)

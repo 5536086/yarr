@@ -8,6 +8,7 @@ import (
 	"github.com/mmcdole/gofeed"
 	"github.com/nkanaev/yarr/storage"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -43,6 +44,17 @@ func (c *Client) get(url string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", c.userAgent)
+	return c.httpClient.Do(req)
+}
+
+func (c *Client) getConditional(url, lastModified, etag string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("If-Modified-Since", lastModified)
+	req.Header.Set("If-None-Match", etag)
 	return c.httpClient.Do(req)
 }
 
@@ -157,13 +169,16 @@ func findFavicon(websiteUrl, feedUrl string) (*[]byte, error) {
 	}
 
 	if len(websiteUrl) != 0 {
+		base, err := url.Parse(websiteUrl)
+		if err != nil {
+			return nil, err
+		}
 		res, err := defaultClient.get(websiteUrl)
 		if err != nil {
 			return nil, err
 		}
 		defer res.Body.Close()
 		doc, err := goquery.NewDocumentFromReader(res.Body)
-		base, err := url.Parse(websiteUrl)
 		if err != nil {
 			return nil, err
 		}
@@ -239,16 +254,37 @@ func convertItems(items []*gofeed.Item, feed storage.Feed) []storage.Item {
 	return result
 }
 
-func listItems(f storage.Feed) ([]storage.Item, error) {
-	res, err := defaultClient.get(f.FeedLink)
+func listItems(f storage.Feed, db *storage.Storage) ([]storage.Item, error) {
+	var res *http.Response
+	var err error
+
+	httpState := db.GetHTTPState(f.Id)
+	if httpState != nil {
+		res, err = defaultClient.getConditional(f.FeedLink, httpState.LastModified, httpState.Etag)
+	} else {
+		res, err = defaultClient.get(f.FeedLink)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
-	if res.StatusCode == 404 {
-		errmsg := fmt.Sprintf("Failed to list feed items for %s (status: 404)", f.FeedLink)
+
+	if res.StatusCode/100 == 4 || res.StatusCode/100 == 5 {
+		errmsg := fmt.Sprintf("Failed to list feed items for %s (status: %d)", f.FeedLink, res.StatusCode)
 		return nil, errors.New(errmsg)
 	}
+
+	if res.StatusCode == 304 {
+		return nil, nil
+	}
+
+	lastModified := res.Header.Get("Last-Modified")
+	etag := res.Header.Get("Etag")
+	if lastModified != "" || etag != "" {
+		db.SetHTTPState(f.Id, lastModified, etag)
+	}
+
 	feedparser := gofeed.NewParser()
 	feed, err := feedparser.Parse(res.Body)
 	if err != nil {
@@ -258,10 +294,16 @@ func listItems(f storage.Feed) ([]storage.Item, error) {
 }
 
 func init() {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DisableKeepAlives = true
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout: 10 * time.Second,
+		}).DialContext,
+		DisableKeepAlives:   true,
+		TLSHandshakeTimeout: time.Second * 10,
+	}
 	httpClient := &http.Client{
-		Timeout: time.Second * 5,
+		Timeout:   time.Second * 30,
 		Transport: transport,
 	}
 	defaultClient = &Client{

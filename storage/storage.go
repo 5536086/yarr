@@ -61,6 +61,16 @@ create virtual table if not exists search using fts4(title, description, content
 create trigger if not exists del_item_search after delete on items begin
   delete from search where rowid = old.search_rowid;
 end;
+
+create table if not exists http_states (
+ feed_id        references feeds(id) unique,
+ last_refreshed datetime not null,
+ last_error     string,
+
+ -- http header fields --
+ last_modified  string not null,
+ etag           string not null
+);
 `
 
 type Storage struct {
@@ -69,11 +79,8 @@ type Storage struct {
 }
 
 func New(path string, logger *log.Logger) (*Storage, error) {
-	initialize := false
 	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			initialize = true
-		} else {
+		if !os.IsNotExist(err) {
 			return nil, err
 		}
 	}
@@ -85,10 +92,8 @@ func New(path string, logger *log.Logger) (*Storage, error) {
 
 	db.SetMaxOpenConns(1)
 
-	if initialize {
-		if _, err := db.Exec(initQuery); err != nil {
-			return nil, err
-		}
+	if _, err := db.Exec(initQuery); err != nil {
+		return nil, err
 	}
 	return &Storage{db: db, log: logger}, nil
 }

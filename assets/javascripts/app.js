@@ -2,6 +2,11 @@
 
 var TITLE = document.title
 
+function authenticated() {
+  return /auth=.+/g.test(document.cookie)
+
+}
+
 var FONTS = [
   "Arial",
   "Courier New",
@@ -80,14 +85,21 @@ Vue.component('drag', {
 
 function dateRepr(d) {
   var sec = (new Date().getTime() - d.getTime()) / 1000
+  var neg = sec < 0
+  var out = ''
+
+  sec = Math.abs(sec)
   if (sec < 2700)  // less than 45 minutes
-    return Math.round(sec / 60) + 'm'
+    out = Math.round(sec / 60) + 'm'
   else if (sec < 86400)  // less than 24 hours
-    return Math.round(sec / 3600) + 'h'
+    out = Math.round(sec / 3600) + 'h'
   else if (sec < 604800)  // less than a week
-    return Math.round(sec / 86400) + 'd'
+    out = Math.round(sec / 86400) + 'd'
   else
-    return d.toLocaleDateString(undefined, {year: "numeric", month: "long", day: "numeric"})
+    out = d.toLocaleDateString(undefined, {year: "numeric", month: "long", day: "numeric"})
+
+  if (neg) return '-' + out
+  return out
 }
 
 Vue.component('relative-time', {
@@ -100,7 +112,7 @@ Vue.component('relative-time', {
       'interval': null,
     }
   },
-  template: '<time :datetime="val">{{formatted}}</time>',
+  template: '<time :datetime="val">{{ formatted }}</time>',
   mounted: function() {
     this.interval = setInterval(function() {
       this.formatted = dateRepr(this.date)
@@ -126,11 +138,11 @@ var vm = new Vue({
   },
   data: function() {
     return {
-      'filterSelected': null,
+      'filterSelected': undefined,
       'folders': [],
       'feeds': [],
-      'feedSelected': null,
-      'feedListWidth': null,
+      'feedSelected': undefined,
+      'feedListWidth': undefined,
       'feedNewChoice': [],
       'feedNewChoiceSelected': '',
       'items': [],
@@ -142,8 +154,8 @@ var vm = new Vue({
       'itemSelectedDetails': {},
       'itemSelectedReadability': '',
       'itemSearch': '',
-      'itemSortNewestFirst': null,
-      'itemListWidth': null,
+      'itemSortNewestFirst': undefined,
+      'itemListWidth': undefined,
 
       'filteredFeedStats': {},
       'filteredFolderStats': {},
@@ -163,6 +175,8 @@ var vm = new Vue({
         'font': '',
         'size': 1,
       },
+      'refreshRate': undefined,
+      'authenticated': authenticated(),
     }
   },
   computed: {
@@ -229,13 +243,13 @@ var vm = new Vue({
       }, 500),
     },
     'filterSelected': function(newVal, oldVal) {
-      if (oldVal === null) return  // do nothing, initial setup
+      if (oldVal === undefined) return  // do nothing, initial setup
       api.settings.update({filter: newVal}).then(this.refreshItems.bind(this))
       this.itemSelected = null
       this.computeStats()
     },
     'feedSelected': function(newVal, oldVal) {
-      if (oldVal === null) return  // do nothing, initial setup
+      if (oldVal === undefined) return  // do nothing, initial setup
       api.settings.update({feed: newVal}).then(this.refreshItems.bind(this))
       this.itemSelected = null
       if (this.$refs.itemlist) this.$refs.itemlist.scrollTop = 0
@@ -259,17 +273,21 @@ var vm = new Vue({
       this.refreshItems()
     }, 500),
     'itemSortNewestFirst': function(newVal, oldVal) {
-      if (oldVal === null) return
+      if (oldVal === undefined) return  // do nothing, initial setup
       api.settings.update({sort_newest_first: newVal}).then(this.refreshItems.bind(this))
     },
     'feedListWidth': debounce(function(newVal, oldVal) {
-      if (oldVal === null) return
+      if (oldVal === undefined) return  // do nothing, initial setup
       api.settings.update({feed_list_width: newVal})
     }, 1000),
     'itemListWidth': debounce(function(newVal, oldVal) {
-      if (oldVal === null) return
+      if (oldVal === undefined) return  // do nothing, initial setup
       api.settings.update({item_list_width: newVal})
     }, 1000),
+    'refreshRate': function(newVal, oldVal) {
+      if (oldVal === undefined) return  // do nothing, initial setup
+      api.settings.update({refresh_rate: newVal})
+    },
   },
   methods: {
     refreshStats: function(loopMode) {
@@ -318,9 +336,14 @@ var vm = new Vue({
         })
     },
     refreshItems: function() {
+      if (this.feedSelected === null) {
+        vm.items = []
+        vm.itemsPage = {'cur': 1, 'num': 1}
+        return
+      }
       var query = this.getItemsQuery()
       this.loading.items = true
-      api.items.list(query).then(function(data) {
+      return api.items.list(query).then(function(data) {
         vm.items = data.list
         vm.itemsPage = data.page
         vm.loading.items = false
@@ -420,10 +443,11 @@ var vm = new Vue({
     deleteFeed: function(feed) {
       if (confirm('Are you sure you want to delete ' + feed.title + '?')) {
         api.feeds.delete(feed.id).then(function() {
-          if (vm.feedSelected === 'feed:'+feed.id) {
-            vm.items = []
-            vm.feedSelected = ''
-          }
+          // unselect feed to prevent reading properties of null in template
+          var isSelected = (vm.feedSelected === 'feed:'+feed.id
+            || (feed.folder_id && vm.feedSelected === 'folder:'+feed.folder_id));
+          if (isSelected) vm.feedSelected = null
+
           vm.refreshStats()
           vm.refreshFeeds()
         })
@@ -562,6 +586,7 @@ api.settings.get().then(function(data) {
   vm.theme.name = data.theme_name
   vm.theme.font = data.theme_font
   vm.theme.size = data.theme_size
+  vm.refreshRate = data.refresh_rate
   vm.refreshItems()
   vm.$mount('#app')
 })

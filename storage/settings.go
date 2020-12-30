@@ -4,14 +4,15 @@ import "encoding/json"
 
 func settingsDefaults() map[string]interface{} {
 	return map[string]interface{}{
-		"filter":          "",
-		"feed":            "",
-		"feed_list_width": 300,
-		"item_list_width": 300,
+		"filter":            "",
+		"feed":              "",
+		"feed_list_width":   300,
+		"item_list_width":   300,
 		"sort_newest_first": true,
-		"theme_name": "light",
-		"theme_font": "",
-		"theme_size": 1,
+		"theme_name":        "light",
+		"theme_font":        "",
+		"theme_size":        1,
+		"refresh_rate":      0,
 	}
 }
 
@@ -22,12 +23,25 @@ func (s *Storage) GetSettingsValue(key string) interface{} {
 	}
 	var val []byte
 	row.Scan(&val)
+	if len(val) == 0 {
+		return nil
+	}
 	var valDecoded interface{}
 	if err := json.Unmarshal([]byte(val), &valDecoded); err != nil {
 		s.log.Print(err)
 		return nil
 	}
 	return valDecoded
+}
+
+func (s *Storage) GetSettingsValueInt64(key string) int64 {
+	val := s.GetSettingsValue(key)
+	if val != nil {
+		if fval, ok := val.(float64); ok {
+			return int64(fval)
+		}
+	}
+	return 0
 }
 
 func (s *Storage) GetSettings() map[string]interface{} {

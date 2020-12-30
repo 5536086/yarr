@@ -9,6 +9,12 @@ type Route struct {
 	url      string
 	urlRegex *regexp.Regexp
 	handler  func(http.ResponseWriter, *http.Request)
+	manualAuth bool
+}
+
+func (r Route) ManualAuth() Route {
+	r.manualAuth = true
+	return r
 }
 
 func p(path string, handler func(http.ResponseWriter, *http.Request)) Route {

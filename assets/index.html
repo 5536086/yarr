@@ -6,11 +6,12 @@
     <link rel="stylesheet" href="./static/stylesheets/bootstrap.min.css">
     <link rel="stylesheet" href="./static/stylesheets/app.css">
     <link rel="icon shortcut" href="./static/graphicarts/anchor.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 </head>
 <body class="theme-light">
-    <div class="d-flex" id="app" v-cloak>
+    <div id="app" class="d-flex" :class="{'feed-selected': feedSelected !== null, 'item-selected': itemSelected !== null}" v-cloak>
         <!-- feed list -->
-        <div class="vh-100 position-relative d-flex flex-column border-right flex-shrink-0" :style="{width: feedListWidth+'px'}">
+        <div id="col-feed-list" class="vh-100 position-relative d-flex flex-column border-right flex-shrink-0" :style="{width: feedListWidth+'px'}">
             <drag :width="feedListWidth" @resize="resizeFeedList"></drag>
             <div class="p-2 toolbar d-flex align-items-center">
                 <div class="icon mx-2">{% inline "anchor.svg" %}</div>
@@ -55,7 +56,18 @@
                         <span class="icon mr-1">{% inline "rotate-cw.svg" %}</span>
                         Refresh Feeds
                     </b-dropdown-item-button>
+
                     <b-dropdown-divider></b-dropdown-divider>
+
+                    <b-dropdown-header>Refresh</b-dropdown-header>
+                    <b-dropdown-item-button @click.stop="refreshRate = min" v-for="min in [0, 60]">
+                        <span class="icon mr-1" :class="{invisible: refreshRate != min}">{% inline "check.svg" %}</span>
+                        <span v-if="min ==  0">Manually</span>
+                        <span v-if="min == 60">Every hour</span>
+                    </b-dropdown-item-button>
+
+                    <b-dropdown-divider></b-dropdown-divider>
+
                     <b-dropdown-header>Sort by</b-dropdown-header>
                     <b-dropdown-item-button @click.stop="itemSortNewestFirst=true">
                         <span class="icon mr-1" :class="{invisible: !itemSortNewestFirst}">{% inline "check.svg" %}</span>
@@ -72,7 +84,7 @@
                                id="opml-import"
                                @change="importOPML"
                                name="opml"
-                               style="opacity: 0; width: 1px; height: 0; position: absolute;">
+                               style="opacity: 0; width: 1px; height: 0; position: absolute; z-index: -1;">
                         <label class="dropdown-item mb-0 cursor-pointer" for="opml-import">
                             <span class="icon mr-1">{% inline "download.svg" %}</span>
                             Import
@@ -82,6 +94,11 @@
                         <span class="icon mr-1">{% inline "upload.svg" %}</span>
                         Export
                     </b-dropdown-item>
+                    <b-dropdown-divider v-if="authenticated"></b-dropdown-divider>
+                    <b-dropdown-item-button v-if="authenticated">
+                        <span class="icon mr-1">{% inline "log-out.svg" %}</span>
+                        Log out
+                    </b-dropdown-item-button>
                 </b-dropdown>
             </div>
             <div class="p-2 overflow-auto border-top flex-grow-1">
@@ -92,7 +109,7 @@
                         <span class="flex-fill text-left text-truncate" v-if="filterSelected=='unread'">All Unread</span>
                         <span class="flex-fill text-left text-truncate" v-if="filterSelected=='starred'">All Starred</span>
                         <span class="flex-fill text-left text-truncate" v-if="filterSelected==''">All Feeds</span>
-                        <span class="counter text-right">{{filteredTotalStats}}</span>
+                        <span class="counter text-right">{{ filteredTotalStats }}</span>
                     </div>
                 </label>
                 <div v-for="folder in foldersWithFeeds">
@@ -108,7 +125,7 @@
                                 {% inline "chevron-right.svg" %}
                             </span>
                             <span class="flex-fill text-left text-truncate">{{ folder.title }}</span>
-                            <span class="counter text-right">{{filteredFolderStats[folder.id] || ''}}</span>
+                            <span class="counter text-right">{{ filteredFolderStats[folder.id] || '' }}</span>
                         </div>
                     </label>
                     <div v-show="!folder.id || folder.is_expanded" class="mt-1" :class="{'pl-3': folder.id}">
@@ -122,7 +139,7 @@
                                 <span class="icon mr-2" v-if="!feed.has_icon">{% inline "rss.svg" %}</span>
                                 <span class="icon mr-2" v-else><img v-lazy="'/api/feeds/'+feed.id+'/icon'" alt=""></span>
                                 <span class="flex-fill text-left text-truncate">{{ feed.title }}</span>
-                                <span class="counter text-right">{{filteredFeedStats[feed.id] || ''}}</span>
+                                <span class="counter text-right">{{ filteredFeedStats[feed.id] || '' }}</span>
                             </div>
                         </label>
                     </div>
@@ -130,13 +147,18 @@
             </div>
             <div class="p-2 toolbar d-flex align-items-center border-top flex-shrink-0" v-if="loading.feeds">
                 <span class="icon loading mx-2"></span>
-                <span class="text-truncate cursor-default noselect">Refreshing ({{loading.feeds}} left)</span>
+                <span class="text-truncate cursor-default noselect">Refreshing ({{ loading.feeds }} left)</span>
             </div>
         </div>
         <!-- item list -->
-        <div class="vh-100 position-relative d-flex flex-column border-right flex-shrink-0"  :style="{width: itemListWidth+'px'}">
+        <div id="col-item-list" class="vh-100 position-relative d-flex flex-column border-right flex-shrink-0" :style="{width: itemListWidth+'px'}">
             <drag :width="itemListWidth" @resize="resizeItemList"></drag>
             <div class="px-2 toolbar d-flex align-items-center">
+                <button class="toolbar-item mr-2 d-block d-md-none"
+                        @click="feedSelected = null"
+                        v-b-tooltip.hover.bottom="'Show Feeds'">
+                    <span class="icon">{% inline "chevron-left.svg" %}</span>
+                </button>
                 <div class="input-icon flex-grow-1">
                     <span class="icon">{% inline "search.svg" %}</span>
                     <input class="d-block toolbar-search" type="" v-model="itemSearch">
@@ -159,18 +181,18 @@
                                 <span class="icon icon-small mr-1" v-if="item.status=='starred'">{% inline "star-full.svg" %}</span>
                             </transition>
                             <small class="flex-fill text-truncate mr-1">
-                                {{feedsById[item.feed_id].title}}
+                                {{ feedsById[item.feed_id].title }}
                             </small>
                             <small class="flex-shrink-0"><relative-time :val="item.date"/></small>
                         </div>
-                        <div>{{item.title || 'untitled'}}</div>
+                        <div>{{ item.title || 'untitled' }}</div>
                     </div>
                 </label>
                 <button class="btn btn-link btn-block loading my-3" v-if="itemsPage.cur < itemsPage.num"></button>
             </div>
         </div>
         <!-- item show -->
-        <div class="vh-100 d-flex flex-column w-100" style="min-width: 0;">
+        <div id="col-item" class="vh-100 d-flex flex-column w-100" style="min-width: 0;">
             <div class="toolbar px-2 d-flex align-items-center" v-if="itemSelected">
                 <button class="toolbar-item"
                         @click="toggleItemStarred(itemSelectedDetails)"
@@ -244,7 +266,7 @@
                  ref="content"
                  class="content px-4 pt-3 pb-5 border-top overflow-auto"
                  :style="{'font-family': theme.font, 'font-size': theme.size + 'rem'}">
-                <h1><b>{{itemSelectedDetails.title}}</b></h1>
+                <h1><b>{{ itemSelectedDetails.title }}</b></h1>
                 <div class="text-muted">
                     <div>{{ feedsById[itemSelectedDetails.feed_id].title }}</div>
                     <time>{{ formatDate(itemSelectedDetails.date) }}</time>
@@ -278,8 +300,8 @@
                         <label class="selectgroup" v-for="choice in feedNewChoice">
                             <input type="radio" name="feedToAdd" :value="choice.url" v-model="feedNewChoiceSelected">
                             <div class="selectgroup-label">
-                                <div>{{ choice.title }}</div>
-                                <div :class="{light: choice.title}">{{ choice.url }}</div>
+                                <div class="text-truncate">{{ choice.title }}</div>
+                                <div class="text-truncate" :class="{light: choice.title}">{{ choice.url }}</div>
                             </div>
                         </label>
                     </div>
@@ -299,7 +321,7 @@
                                 <template v-slot:button-content>
                                     <span class="icon">{% inline "more-vertical.svg" %}</span>
                                 </template>
-                                <b-dropdown-header>{{folder.title}}</b-dropdown-header>
+                                <b-dropdown-header>{{ folder.title }}</b-dropdown-header>
                                 <b-dropdown-item @click.prevent="renameFolder(folder)">Rename</b-dropdown-item>
                                 <b-dropdown-divider></b-dropdown-divider>
                                 <b-dropdown-item class="dropdown-danger"
@@ -320,7 +342,7 @@
                                 <template v-slot:button-content>
                                     <span class="icon">{% inline "more-vertical.svg" %}</span>
                                 </template>
-                                <b-dropdown-header>{{feed.title}}</b-dropdown-header>
+                                <b-dropdown-header>{{ feed.title }}</b-dropdown-header>
                                 <b-dropdown-item :href="feed.link" target="_blank" v-if="feed.link">Visit Website</b-dropdown-item>
                                 <b-dropdown-divider v-if="feed.link"></b-dropdown-divider>
                                 <b-dropdown-item @click.prevent="renameFeed(feed)">Rename</b-dropdown-item>

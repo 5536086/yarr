@@ -2,9 +2,9 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
-	"encoding/base64"
 	"compress/gzip"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"github.com/nkanaev/yarr/storage"
 	"html"
@@ -22,8 +22,9 @@ import (
 )
 
 var routes []Route = []Route{
-	p("/", IndexHandler),
-	p("/static/*path", StaticHandler),
+	p("/", IndexHandler).ManualAuth(),
+	p("/static/*path", StaticHandler).ManualAuth(),
+
 	p("/api/status", StatusHandler),
 	p("/api/folders", FolderListHandler),
 	p("/api/folders/:id", FolderHandler),
@@ -42,7 +43,7 @@ var routes []Route = []Route{
 
 type asset struct {
 	etag    string
-	body    string  // base64(gzip(content))
+	body    string // base64(gzip(content))
 	gzipped *[]byte
 	decoded *string
 }
@@ -89,6 +90,35 @@ type ItemUpdateForm struct {
 }
 
 func IndexHandler(rw http.ResponseWriter, req *http.Request) {
+	h := handler(req)
+	if h.requiresAuth() && !userIsAuthenticated(req, h.Username, h.Password) {
+		if req.Method == "POST" {
+			username := req.FormValue("username")
+			password := req.FormValue("password")
+			if safeCompare(username, h.Username) && safeCompare(password, h.Password) {
+				userAuthenticate(rw, username, password)
+				http.Redirect(rw, req, req.URL.Path, http.StatusFound)
+				return
+			}
+		}
+
+		if assets != nil {
+			asset := assets["login.html"]
+			rw.Header().Set("Content-Type", "text/html")
+			rw.Header().Set("Content-Encoding", "gzip")
+			rw.Write(*asset.gzip())
+			return
+		} else {
+			f, err := os.Open("assets/login.html")
+			if err != nil {
+				handler(req).log.Print(err)
+				return
+			}
+			io.Copy(rw, f)
+			return
+		}
+	}
+
 	if assets != nil {
 		asset := assets["index.html"]
 
@@ -243,6 +273,15 @@ func FeedListHandler(rw http.ResponseWriter, req *http.Request) {
 				form.FolderID,
 			)
 			db(req).CreateItems(convertItems(feed.Items, *storedFeed))
+
+			icon, err := findFavicon(storedFeed.Link, storedFeed.FeedLink)
+			if icon != nil {
+				db(req).UpdateFeedIcon(storedFeed.Id, icon)
+			}
+			if err != nil {
+				handler(req).log.Printf("Failed to find favicon for %s (%d): %s", storedFeed.FeedLink, storedFeed.Id, err)
+			}
+
 			writeJSON(rw, map[string]string{"status": "success"})
 		} else if sources != nil {
 			writeJSON(rw, map[string]interface{}{"status": "multiple", "choice": sources})
@@ -348,7 +387,7 @@ func ItemListHandler(rw http.ResponseWriter, req *http.Request) {
 		})
 	} else if req.Method == "PUT" {
 		query := req.URL.Query()
-		filter := storage.ItemFilter{}
+		filter := storage.MarkFilter{}
 		if folderID, err := strconv.ParseInt(query.Get("folder_id"), 10, 64); err == nil {
 			filter.FolderID = &folderID
 		}
@@ -372,6 +411,9 @@ func SettingsHandler(rw http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if db(req).UpdateSettings(settings) {
+			if _, ok := settings["refresh_rate"]; ok {
+				handler(req).refreshRate <- db(req).GetSettingsValueInt64("refresh_rate")
+			}
 			rw.WriteHeader(http.StatusOK)
 		} else {
 			rw.WriteHeader(http.StatusBadRequest)
