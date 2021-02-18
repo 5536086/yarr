@@ -31,6 +31,7 @@ var routes []Route = []Route{
 	p("/api/feeds", FeedListHandler),
 	p("/api/feeds/find", FeedHandler),
 	p("/api/feeds/refresh", FeedRefreshHandler),
+	p("/api/feeds/errors", FeedErrorsHandler),
 	p("/api/feeds/:id/icon", FeedIconHandler),
 	p("/api/feeds/:id", FeedHandler),
 	p("/api/items", ItemListHandler),
@@ -39,6 +40,7 @@ var routes []Route = []Route{
 	p("/opml/import", OPMLImportHandler),
 	p("/opml/export", OPMLExportHandler),
 	p("/page", PageCrawlHandler),
+	p("/logout", LogoutHandler),
 }
 
 type asset struct {
@@ -95,7 +97,7 @@ func IndexHandler(rw http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" {
 			username := req.FormValue("username")
 			password := req.FormValue("password")
-			if safeCompare(username, h.Username) && safeCompare(password, h.Password) {
+			if stringsEqual(username, h.Username) && stringsEqual(password, h.Password) {
 				userAuthenticate(rw, username, password)
 				http.Redirect(rw, req, req.URL.Path, http.StatusFound)
 				return
@@ -227,6 +229,11 @@ func FeedRefreshHandler(rw http.ResponseWriter, req *http.Request) {
 	} else {
 		rw.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func FeedErrorsHandler(rw http.ResponseWriter, req *http.Request) {
+	errors := db(req).GetFeedErrors()
+	writeJSON(rw, errors)
 }
 
 func FeedIconHandler(rw http.ResponseWriter, req *http.Request) {
@@ -521,4 +528,9 @@ func PageCrawlHandler(rw http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
+}
+
+func LogoutHandler(rw http.ResponseWriter, req *http.Request) {
+	userLogout(rw)
+	rw.WriteHeader(http.StatusNoContent)
 }

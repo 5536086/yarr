@@ -177,6 +177,7 @@ var vm = new Vue({
       },
       'refreshRate': undefined,
       'authenticated': authenticated(),
+      'feed_errors': {},
     }
   },
   computed: {
@@ -444,7 +445,8 @@ var vm = new Vue({
       if (confirm('Are you sure you want to delete ' + feed.title + '?')) {
         api.feeds.delete(feed.id).then(function() {
           // unselect feed to prevent reading properties of null in template
-          var isSelected = (vm.feedSelected === 'feed:'+feed.id
+          var isSelected = !vm.feedSelected
+            || (vm.feedSelected === 'feed:'+feed.id
             || (feed.folder_id && vm.feedSelected === 'folder:'+feed.folder_id));
           if (isSelected) vm.feedSelected = null
 
@@ -507,6 +509,11 @@ var vm = new Vue({
         vm.refreshStats()
       })
     },
+    logout: function() {
+      api.logout().then(function() {
+        document.location.reload()
+      })
+    },
     getReadable: function(item) {
       if (this.itemSelectedReadability) {
         this.itemSelectedReadability = null
@@ -529,6 +536,12 @@ var vm = new Vue({
     showSettings: function(settings) {
       this.settings = settings
       this.$bvModal.show('settings-modal')
+
+      if (settings === 'manage') {
+        api.feeds.list_errors().then(function(errors) {
+          vm.feed_errors = errors
+        })
+      }
     },
     resizeFeedList: function(width) {
       this.feedListWidth = Math.min(Math.max(200, width), 700)

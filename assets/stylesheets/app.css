@@ -177,6 +177,7 @@ select.form-control:not([multiple]):not([size]) {
 .selectgroup-label {
   padding: .375rem .5rem;
   border-radius: 4px;
+  overflow-wrap: break-word;
 }
 
 .selectgroup-label:hover {
@@ -577,5 +578,21 @@ a,
   }
   #app.item-selected #col-item {
     display: flex !important;
+  }
+}
+
+/* styles for both mobile & tablet layout */
+
+@media (max-width: 991.98px) {
+  .drag {
+    cursor: default;
+  }
+  .toolbar {
+    min-height: 3rem !important;
+    max-height: 3rem !important;
+  }
+  .toolbar-item,
+  .toolbar-search {
+    padding: .5rem;
   }
 }

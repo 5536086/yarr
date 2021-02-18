@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
-	"github.com/nkanaev/yarr/storage"
 	"log"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/nkanaev/yarr/storage"
 )
 
 type Handler struct {
@@ -18,8 +20,11 @@ type Handler struct {
 	queueSize   *int32
 	refreshRate chan int64
 	// auth
-	Username    string
-	Password    string
+	Username string
+	Password string
+	// https
+	CertFile string
+	KeyFile  string
 }
 
 func New(db *storage.Storage, logger *log.Logger, addr string) *Handler {
@@ -34,23 +39,57 @@ func New(db *storage.Storage, logger *log.Logger, addr string) *Handler {
 	}
 }
 
+func (h *Handler) GetAddr() string {
+	proto := "http"
+	if h.CertFile != "" && h.KeyFile != "" {
+		proto = "https"
+	}
+	return proto + "://" + h.Addr + BasePath
+}
+
 func (h *Handler) Start() {
 	h.startJobs()
 	s := &http.Server{Addr: h.Addr, Handler: h}
-	err := s.ListenAndServe()
+
+	var err error
+	if h.CertFile != "" && h.KeyFile != "" {
+		err = s.ListenAndServeTLS(h.CertFile, h.KeyFile)
+	} else {
+		err = s.ListenAndServe()
+	}
 	if err != http.ErrServerClosed {
 		h.log.Fatal(err)
 	}
 }
 
+func unsafeMethod(method string) bool {
+	return method == "POST" || method == "PUT" || method == "DELETE"
+}
+
 func (h Handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	route, vars := getRoute(req)
+	reqPath := req.URL.Path
+	if BasePath != "" {
+		if !strings.HasPrefix(reqPath, BasePath) {
+			rw.WriteHeader(http.StatusNotFound)
+			return
+		}
+		reqPath = strings.TrimPrefix(req.URL.Path, BasePath)
+		if reqPath == "" {
+			http.Redirect(rw, req, BasePath+"/", http.StatusFound)
+			return
+		}
+	}
+	route, vars := getRoute(reqPath)
 	if route == nil {
 		rw.WriteHeader(http.StatusNotFound)
 		return
 	}
 
 	if h.requiresAuth() && !route.manualAuth {
+		if unsafeMethod(req.Method) && req.Header.Get("X-Requested-By") != "yarr" {
+			rw.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		if !userIsAuthenticated(req, h.Username, h.Password) {
 			rw.WriteHeader(http.StatusUnauthorized)
 			return
@@ -86,6 +125,7 @@ func (h *Handler) startJobs() {
 				atomic.AddInt32(h.queueSize, -1)
 				if err != nil {
 					h.log.Printf("Failed to fetch %s (%d): %s", feed.FeedLink, feed.Id, err)
+					h.db.SetFeedError(feed.Id, err)
 					continue
 				}
 				h.db.CreateItems(items)
@@ -151,6 +191,7 @@ func (h Handler) requiresAuth() bool {
 
 func (h *Handler) fetchAllFeeds() {
 	h.log.Print("Refreshing all feeds")
+	h.db.ResetFeedErrors()
 	for _, feed := range h.db.ListFeeds() {
 		h.fetchFeed(feed)
 	}
