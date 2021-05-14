@@ -1,5 +1,30 @@
 # upcoming
 
+- (new) configuration via env variables
+- (fix) missing `content-type` headers (thanks to @verahawk for the report)
+- (fix) handle opml files not following the spec (thanks to @huangnauh for the report)
+
+# v2.0 (2021-04-18)
+
+- (new) user interface tweaks
+- (new) feed parser fully rewritten
+- (new) show youtube/vimeo iframes in "read here"
+- (new) keyboard shortcuts for article scrolling & toggling "read here"
+- (new) more options for auto-refresh intervals
+- (fix) `-base` not serving static files (thanks to @vfaronov)
+- (etc) 3rd-party dependencies reduced to the bare minimum
+
+special thanks to @tillcash for feedback & suggestions.
+
+# v1.4 (2021-03-11)
+
+- (new) keyboard shortcuts (thanks to @Duarte-Dias)
+- (new) show podcast audio
+- (fix) deleting feeds
+- (etc) minor ui tweaks & changes
+
+# v1.3 (2021-02-18)
+
 - (fix) log out functionality if authentication is set
 - (fix) import opml if authentication is set
 - (fix) login page if authentication is set (thanks to @einschmidt)
